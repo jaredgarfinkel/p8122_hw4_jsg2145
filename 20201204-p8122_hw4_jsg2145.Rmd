@@ -8,11 +8,6 @@ output: html_document
 ```{r setup, include=FALSE}
 library(tidyverse)
 library(viridis)
-library(ggdag)
-library(mlogit)
-library(personalized)
-library(tableone)
-library(ri)
 knitr::opts_chunk$set(
 	echo = TRUE,
 	warning = FALSE,
@@ -29,3 +24,71 @@ scale_colour_discrete = scale_colour_viridis_d
 scale_fill_discrete = scale_fill_viridis_d
 theme_set(theme_minimal() + theme(legend.position = "bottom"))
 ```
+
+```{r}
+data = read_tsv("./data/gardasil.dat.txt") %>% 
+  janitor::clean_names() %>% 
+  select(-c(x11:x12))
+data
+```
+
+There are `r nrow(data)` rows by `r ncol(data)` columns in the dataset.
+
+```{r}
+skimr::skim(df)
+```
+
+There is no missing data. 
+
+The ages range from `r min(pull(data, age))` to `r max(pull(data, age))` with a median age of 18 years old.
+
+There is a categorical variable, age_group, that categorizes patients by age. It appears that this variable uses 18 years old as a cutoff for adulthood.
+
+There is a variable for race that appears to include 4 races, "0", "1", "2", and "3".
+
+The variable shots ranges from 1 to 3.
+
+There are 4 different insurance types, med_assist (0 or 1), location (1, 2, 3, or 4), location type (0 or 1), and practice type (0, 1, or 2).
+
+All the variables are categorical except for age, which has been split into age_group.
+
+# Part 1
+
+The outcome variable (completed) is removed from the dataset.
+
+```{r}
+data %>% 
+  select(-completed) %>% 
+  ggplot(aes(x = practice_type, y = age, fill = as_factor(practice_type))) +
+  geom_boxplot()
+```
+
+```{r}
+xtabs(~ practice_type + race, data = data)
+```
+
+```{r}
+xtabs(~practice_type + insurance_type, data = data)
+```
+
+
+```{r}
+xtabs(~practice_type + med_assist, data = data)
+```
+
+```{r}
+xtabs(~practice_type + location, data = data)
+```
+
+```{r}
+xtabs(~practice_type + location_type, data = data)
+```
+
+```{r}
+xtabs(~practice_type + age_group, data = data)
+```
+
+There is sparse data in the practice type and location type cross tabulation and in the practice type and insurance type cross tabulation.
+
+It appears that patients who go to practice_type "2" tend to be older than those who go to practice_type "0".
+
