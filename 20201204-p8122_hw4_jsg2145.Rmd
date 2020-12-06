@@ -8,6 +8,10 @@ output: html_document
 ```{r setup, include=FALSE}
 library(tidyverse)
 library(viridis)
+library(tableone)
+library(MatchIt)
+library(personalized)
+library(survey)
 knitr::opts_chunk$set(
 	echo = TRUE,
 	warning = FALSE,
@@ -35,7 +39,7 @@ data
 There are `r nrow(data)` rows by `r ncol(data)` columns in the dataset.
 
 ```{r}
-skimr::skim(df)
+skimr::skim(data)
 ```
 
 There is no missing data. 
@@ -59,8 +63,8 @@ The outcome variable (completed) is removed from the dataset.
 ```{r}
 data %>% 
   select(-completed) %>% 
-  ggplot(aes(x = practice_type, y = age, fill = as_factor(practice_type))) +
-  geom_boxplot()
+  ggplot(aes(x = as_factor(practice_type), y = age, fill = as_factor(practice_type))) +
+  geom_violin()
 ```
 
 ```{r}
@@ -91,4 +95,142 @@ xtabs(~practice_type + age_group, data = data)
 There is sparse data in the practice type and location type cross tabulation and in the practice type and insurance type cross tabulation.
 
 It appears that patients who go to practice_type "2" tend to be older than those who go to practice_type "0".
+
+```{r}
+vars = c("age", "age_group", "race", "insurance_type", "med_assist", "location", "location_type")
+covbal0 <- CreateTableOne(vars = vars, strata = "practice_type", data = data, test = FALSE, smd=TRUE)
+print(covbal0, smd = TRUE)
+```
+
+# Part 2
+
+In an RCT the eligibility criteria and treatment and control arm are prespecified. 
+
+The treatment arm can be those who attend the OB-GYN and the control arm can be those who go to a general practice or pediatrician.
+
+To find the rates of completion at different types of practices, we are interested in achieving the following properties for the assignment mechanism:
+
+1) Individualistic
+
+2) Probabilistic
+
+3) Unconfounded
+
+4) Known and controlled
+
+In order to make this observational study probabilistic, we can make ineligible those who attend a pediatrician, who will almost always be younger than those who do not. This eliminates those in practice type "0", n = 515.
+
+# Part 3
+
+```{r}
+data2 = data %>% 
+  filter(practice_type!=0) %>% 
+  mutate(practice_type = recode(practice_type, 
+                                "1" = "0",
+                                "2" = "1"),
+         practice_type = as.numeric(practice_type))
+covbal1 <- CreateTableOne(vars = vars, strata = "practice_type", data = data2, test = FALSE, smd=TRUE)
+print(covbal1, smd = TRUE)
+```
+
+The standardized mean differences are less, but still slightly high. Maybe trimming would improve overlap.
+
+# Part 4
+
+## fit propensity score model
+
+At first there were over one hundred observations with a propensity score of 1.0.
+
+Using intuition and the fact that there was missing data in the location variable for some practice types, the location variables were removed from the propensity model.
+
+This may be problematic because it means that there may be confounders that could affect which practice type one attends and the outcome of interest as well as the location of the patient.
+
+```{r}
+ps.model <- glm(practice_type ~ age + age_group + race + insurance_type + med_assist + location + location_type, data = data2, family = binomial)
+summary(ps.model)
+ps <- predict(ps.model, type="response")
+```
+
+```{r}
+prop.func <- function(x = data2, trt = treat) {
+  # fit propensity score model
+  propens.model <- glm(practice_type ~ age + age_group + race + insurance_type + med_assist + location + location_type, data = x, family = binomial)
+  pi.x <- predict(propens.model, type = "response")
+  return(pi.x)
+}
+```
+
+
+```{r}
+check.overlap(x = data2,
+              trt = data2$practice_type,
+              propensity.func = prop.func)
+```
+
+```{r}
+check.overlap(x = data2,
+              trt = data2$practice_type,
+              type = "both",
+              propensity.func = prop.func)
+```
+
+
+
+# Part 5
+
+```{r, results = "hide"}
+min(ps[data2$practice_type==1])
+ps[which(data2$practice_type==0)] <= min(ps[data2$practice_type==1])
+
+max(ps[data2$practice_type==0])
+ps[which(data2$practice_type==1)] >= max(ps[data2$practice_type==0])
+```
+
+```{r}
+df = data2[ps>=min(ps[data2$practice_type==1]) & ps <= max(ps[data2$practice_type==0]),] 
+dim(df)
+dim(data2)
+```
+
+There are `r nrow(df)` patients in the final analytical sample compared to `r nrow(data2)` in the original model with eligible patients only. There were `r nrow(data2) - nrow(df)` patients excluded during trimming. This is also `r nrow(data) - nrow(df)` fewer patients than the original sample.
+
+```{r}
+### refitting propensity score model
+ps.model2<-glm(practice_type ~ age + age_group + race + shots + insurance_type + med_assist + location + location_type, data=df , family = binomial)
+summary(ps.model2)
+
+ps2 <- predict(ps.model2, type="response") #gets the propensity scores for each unit, based on the model
+check.overlap(x = df,
+              trt = df$practice_type,
+              propensity.func = prop.func)
+check.overlap(x = df,
+              trt = df$practice_type,
+              type = "both",
+              propensity.func = prop.func)
+```
+
+```{r}
+psmatch1 <- matchit(practice_type ~ age + age_group + race + insurance_type + med_assist + location + location_type, 
+                    distance="logit", method = "nearest", discard = "control", data = df)
+
+psmatch1.data <- match.data(psmatch1)
+```
+
+# Part 6
+
+```{r}
+psmatch1.mod <- svyglm(completed ~ practice_type + age + age_group + race + insurance_type + med_assist + location + location_type, 
+                       design = svydesign(~ 1, weights = ~ weights, data = psmatch1.data))
+summary(psmatch1.mod)
+```
+
+The practice type has a log odds ratio of 0.038258 (95% CI: [`r 0.038258 - 1.96*.042671`, `r 0.038258 + 1.96*.042671], p = 0.37045).
+
+Therefore, we do not reject the null that there is no causal effect of practice type on completion of the vaccine.
+
+# Part 7
+
+```{r}
+
+```
 
