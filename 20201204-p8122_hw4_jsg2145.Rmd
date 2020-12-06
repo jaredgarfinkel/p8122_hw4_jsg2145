@@ -231,6 +231,40 @@ Therefore, we do not reject the null that there is no causal effect of practice 
 # Part 7
 
 ```{r}
-
+psmatch1c <- matchit(practice_type ~ age + age_group + race + insurance_type + med_assist + location + location_type, 
+                    distance="logit", method = "nearest",estimand="ATC", data = df)
+psmatch1c.data <- match.data(psmatch1c)
 ```
 
+```{r}
+psmatch1c.mod <- svyglm(completed ~ practice_type + age + age_group + race + insurance_type + med_assist + location + location_type, 
+                       design = svydesign(~ 1, weights = ~ weights, data = psmatch1c.data))
+summary(psmatch1c.mod)
+```
+
+The practice type has a log odds ratio of 0.026862 (95% CI: [`r 0.026862 - 1.96*0.042955`, `r 0.026862 + 1.96*0.042955`], p = 0.53207).
+
+Therefore, we do not reject that null that there is no causal effect of practice type on completion of the vaccine.
+
+## ATE
+
+```{r}
+psmatch_ate <- matchit(practice_type ~ age + age_group + race + insurance_type + med_assist + location + location_type, 
+                       data = df,  
+                       distance = "logit",
+                       estimand = "ATE")
+```
+
+```{r}
+psmatchate.data <- match.data(psmatch_ate)
+psmatchate.mod <- svyglm(completed ~ practice_type + age + age_group + race + insurance_type + med_assist + location + location_type,
+                         design = svydesign(~ 1, weights = ~ weights,data=psmatchate.data))
+summary(psmatchate.mod)
+plot(psmatch_ate)
+plot(psmatch_ate, type="jitter", interactive = FALSE)
+plot(psmatch_ate, type="hist")
+```
+
+An average treatment effect (ATE) analysis shows that there is not evidence to reject the null.
+
+Therefore, we accept the null that there is no causal effect of practice type on completion of the vaccine.
